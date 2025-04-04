@@ -173,8 +173,14 @@ const loginUser = asyncHandler(async (req, res) => {
     );
 });
 
+const logoutUser = asyncHandler(async (req, res) => {
+  await User
+    .findByIdAndUpdate
+    // need to come back after middleware
+    ();
+});
+
 const refreshAccessToken = asyncHandler(async (req, res) => {
-  // get the incoming refresh token from the cookie
   const incomingRefreshToken =
     req.cookies.refreshToken || req.body.refreshToken;
 
@@ -187,23 +193,24 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       incomingRefreshToken,
       process.env.REFRESH_TOKEN_SECRET
     );
-    const user = await User.findById(decodedToken?._id);
+
+    const user = await User.findById(decodedToken._id);
 
     if (!user) {
-      throw new ApiError(404, "Invalid refresh token");
+      throw new ApiError(404, "User not found");
     }
 
-    if (incomingRefreshToken !== user?.refreshAccessToken) {
+    if (incomingRefreshToken !== user?.refreshToken) {
       throw new ApiError(401, "Invalid refresh token");
     }
+
+    const { accessToken, refreshToken: newRefreshToken } =
+      await generateAccessAndRefreshToken(user._id);
 
     const options = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
     };
-
-    const { accessToken, refreshToken: newRefreshToken } =
-      await generateAccessAndRefreshToken(user._id);
 
     return res
       .status(200)
@@ -213,7 +220,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
         new ApiResponse(
           200,
           { accessToken, refreshToken: newRefreshToken },
-          "Action token refreshed successfully"
+          "Access token refreshed successfully"
         )
       );
   } catch (error) {
