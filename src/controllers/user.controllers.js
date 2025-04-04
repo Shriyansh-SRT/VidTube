@@ -6,6 +6,28 @@ import {
   uploadOnCloudinary,
   deleteFromCloudinary,
 } from "../utils/cloudinary.js";
+import e from "express";
+
+const generateAccessAndRefreshToken = async (userId) => {
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    const refreshToken = user.generateRefreshToken();
+    const accessToken = user.generateAccessToken();
+
+    user.refreshToken = refreshToken;
+
+    await user.save({ validateBeforeSave: false });
+    return { refreshToken, accessToken };
+  } catch (error) {
+    console.log("Error generating access and refresh token", error);
+    throw new ApiError(500, "Failed to generate tokens");
+  }
+};
 
 const registerUser = asyncHandler(async (req, res) => {
   // todo // accept the data from the user
@@ -94,6 +116,65 @@ const registerUser = asyncHandler(async (req, res) => {
       await deleteFromCloudinary(coverImage.public_id);
     }
     throw new ApiError(500, "Failed deleting files from cloudinary");
+  }
+});
+
+const loginUser = asyncHandler(async (req, res) => {
+  try {
+    // get creadentials from req body
+    const { username, email, password } = req.body;
+
+    // validate input/ request body
+    if ([username, email, password].some((field) => field?.trim() === "")) {
+      throw new ApiError(400, "All Fields are required");
+    }
+
+    // check if the user already exists
+    const user = User.findOne({
+      $or: [{ username }, { email }],
+    });
+
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    // validate password
+    const isPasswordMatched = await user.isPasswordCorrect(password);
+    if (!isPasswordMatched) {
+      throw new ApiError(401, "Invalid credentials");
+    }
+
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(
+      user._id
+    );
+
+    const loggedInUser = await User.findById(user._id).select(
+      "-password -refreshToken"
+    );
+
+    if (!loggedInUser) {
+      throw new ApiError(404, "User not found");
+    }
+
+    const options = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    };
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", refreshToken, options)
+      .json(
+        new ApiResponse(
+          200,
+          { user: loggedInUser, accessToken, refreshToken },
+          "User logged in successfully"
+        )
+      );
+  } catch (error) {
+    console.log("Error logging in the user", error);
+    throw new ApiError(500, "Failed to login user");
   }
 });
 
